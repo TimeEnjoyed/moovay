@@ -1,0 +1,7 @@
+[SERVER]
+host = "localhost"
+port = 3553
+secret = ""
+
+[DATABASE]
+dsn = "postgres://USER:PASSWORD@localhost:5432/moovay"
