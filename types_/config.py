@@ -26,6 +26,12 @@ class Database(TypedDict):
     dsn: str
 
 
+class Redis(TypedDict):
+    url_rate: str
+    url_sess: str
+
+
 class Config(TypedDict):
     SERVER: Server
     DATABASE: Database
+    REDIS: Redis

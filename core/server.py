@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import logging
+
 import starlette_plus
 from starlette.middleware import Middleware
 
@@ -20,20 +22,40 @@ from .config import config
 from .database import Database
 
 
+logger: logging.Logger = logging.getLogger(__name__)
+
+
 class Application(starlette_plus.Application):
     def __init__(self, *, database: Database) -> None:
         self.database: Database = database
 
-        redis_rate: starlette_plus.Redis = starlette_plus.Redis(url="redis://localhost:6379/10")
-        redis_sess: starlette_plus.Redis = starlette_plus.Redis(url="redis://localhost:6379/11")
-
         secret: str = config["SERVER"]["secret"]
+        url_rate: str = config["REDIS"]["url_rate"]
+        url_sess: str = config["REDIS"]["url_sess"]
 
-        ratelimiter: Middleware = Middleware(starlette_plus.middleware.RatelimitMiddleware, redis=redis_rate)
-        sessions: Middleware = Middleware(starlette_plus.middleware.SessionMiddleware, redis=redis_sess, secret=secret)
+        self.redis_rate: starlette_plus.Redis = starlette_plus.Redis(url=url_rate)
+        self.redis_sess: starlette_plus.Redis = starlette_plus.Redis(url=url_sess)
 
-        middleware: list[Middleware] = [ratelimiter, sessions]
-        super().__init__(middleware=middleware)
+        middleware: list[Middleware] = [
+            Middleware(starlette_plus.middleware.RatelimitMiddleware, redis=self.redis_rate),
+            Middleware(starlette_plus.middleware.SessionMiddleware, redis=self.redis_sess, secret=secret),
+        ]
+
+        super().__init__(on_startup=[self.on_startup], on_shutdown=[self.on_shutdown], middleware=middleware)
+
+    async def on_startup(self) -> None:
+        try:
+            await self.redis_rate.ping()
+            await self.redis_sess.ping()
+        except Exception as e:
+            raise RuntimeError("Failed to connect to Redis. Shutting down application.") from e
+
+    async def on_shutdown(self) -> None:
+        try:
+            await self.redis_rate.pool.close()  # type: ignore
+            await self.redis_sess.pool.close()  # type: ignore
+        except Exception:
+            logger.warning("Failed to gracefully close Redis connections. This can most likely be ignored.")
 
     @starlette_plus.route("/test")
     async def test_route(self, request: starlette_plus.Request) -> starlette_plus.Response:
